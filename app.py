@@ -458,7 +458,10 @@ elif nav_option == "Ask the HLD":
             ]
         )
     with col_ctrl2:
-        model_options = []
+        model_options = [
+            "gemini-2.5-flash (Google AI - Recommended 2.5)",
+            "gemini-2.5-flash-lite (Google AI - 2.5 Fast Lite)",
+        ]
         # Detected Ollama models
         if rag_assistant.ollama_available and rag_assistant.models:
             for m in rag_assistant.models:
@@ -471,19 +474,25 @@ elif nav_option == "Ask the HLD":
             model_options.append("qwen2.5:1.5b (Local Ollama)")
         if "llama3:latest (Local Ollama)" not in model_options:
             model_options.append("llama3:latest (Local Ollama)")
-        model_options.append("gemini-2.5-flash (Google AI - Cloud Fallback)")
 
-        # Default to qwen2.5:1.5b if available or selected model
+        # Default to gemini-2.5-flash if API key configured, otherwise local model
         default_idx = 0
-        target_name = getattr(config, "MODEL_NAME", "qwen2.5:1.5b")
-        for i, opt in enumerate(model_options):
-            if target_name in opt:
-                default_idx = i
-                break
+        if not config.GEMINI_API_KEY:
+            target_name = getattr(config, "MODEL_NAME", "qwen2.5:1.5b")
+            for i, opt in enumerate(model_options):
+                if target_name in opt:
+                    default_idx = i
+                    break
 
         selected_model_label = st.selectbox("Active AI Model", model_options, index=default_idx)
-        selected_model = "gemini-2.5-flash" if "gemini" in selected_model_label.lower() else selected_model_label.split()[0]
-        st.caption(f"🛡️ **Fallback Chain:** `{selected_model}` ➔ Local Models ➔ Cloud Gemini ➔ Offline Context")
+        if "gemini-2.5-flash-lite" in selected_model_label.lower():
+            selected_model = "gemini-2.5-flash-lite"
+        elif "gemini" in selected_model_label.lower():
+            selected_model = "gemini-2.5-flash"
+        else:
+            selected_model = selected_model_label.split()[0]
+
+        st.caption(f"🛡️ **Fallback Chain:** `{selected_model}` ➔ Gemini 2.5 ➔ Local Models ➔ Offline Context")
 
     user_query = st.text_input("Enter your architectural question:", value="" if preset_q.startswith("--") else preset_q)
 
@@ -737,8 +746,8 @@ elif nav_option == "System Status":
         {"Component": "SQLite Database", "Status": "Connected", "Details": sqlite_status},
         {"Component": "OCR Engine (Tesseract)", "Status": "Available" if ocr_ok else "Optional Fallback Enabled", "Details": ocr_msg},
         {"Component": "Ollama Local LLM", "Status": "Connected" if ollama_ok else "Not Available", "Details": f"Models: {', '.join(ollama_models) if ollama_models else 'None (Start ollama serve)'}"},
-        {"Component": "Google Gemini API", "Status": "Connected (Active Fallback)", "Details": f"Model: {config.GEMINI_FALLBACK_MODEL}"},
-        {"Component": "Active AI Engine", "Status": "Ready", "Details": f"Hybrid Local Ollama + Cloud Gemini ({config.GEMINI_FALLBACK_MODEL})"}
+        {"Component": "Google Gemini API", "Status": "Connected (Active 2.5 Fallback)" if config.GEMINI_API_KEY else "Not Configured (Add to .env)", "Details": f"Primary: {config.GEMINI_FALLBACK_MODEL} | Fallback: gemini-2.5-flash-lite"},
+        {"Component": "Active AI Engine", "Status": "Ready", "Details": f"Hybrid Local Ollama + Cloud Gemini 2.5 ({config.GEMINI_FALLBACK_MODEL})"}
     ]
     
     st.dataframe(pd.DataFrame(status_data), use_container_width=True)

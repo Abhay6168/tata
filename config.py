@@ -46,9 +46,14 @@ FALLBACK_OLLAMA_MODELS = [
     "qwen:latest"
 ]
 
-# Gemini Fallback Configuration
+# Gemini Cloud Models Configuration
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_FALLBACK_MODEL = "gemini-2.5-flash"
+GEMINI_FALLBACK_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
+]
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
 # Retrieval Configuration

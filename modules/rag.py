@@ -100,11 +100,18 @@ def generate_gemini_response(
     api_key: Optional[str] = None
 ) -> str:
     """
-    Sends request to Google Gemini API (gemini-2.5-flash) as an intelligent fallback.
+    Sends request to Google Gemini API (defaulting to gemini-2.5-flash) with
+    automatic fallback to gemini-2.5-flash-lite on rate limit (HTTP 429).
     """
     key = api_key or config.GEMINI_API_KEY
-    clean_model = model.replace("models/", "")
-    url = f"{config.GEMINI_BASE_URL}/models/{clean_model}:generateContent?key={key}"
+    if not key:
+        return "Notice: No Gemini API Key configured."
+
+    # Build priority list starting with requested model
+    target_models = [model]
+    for m in getattr(config, "GEMINI_MODELS", ["gemini-2.5-flash", "gemini-2.5-flash-lite"]):
+        if m not in target_models:
+            target_models.append(m)
 
     full_user_content = f"SYSTEM INSTRUCTIONS:\n{system_prompt}\n\nUSER REQUEST:\n{prompt}"
     payload = {
@@ -120,20 +127,32 @@ def generate_gemini_response(
     }
     headers = {"Content-Type": "application/json"}
 
-    try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=30)
-        if resp.status_code == 200:
-            data = resp.json()
-            candidates = data.get("candidates", [])
-            if candidates:
-                parts = candidates[0].get("content", {}).get("parts", [])
-                if parts:
-                    return parts[0].get("text", "").strip()
-            return "Notice: Gemini generated empty response."
-        else:
-            return f"Error from Gemini API ({resp.status_code}): {resp.text}"
-    except Exception as e:
-        return f"Error communicating with Gemini API: {str(e)}"
+    last_error = ""
+    for candidate_model in target_models:
+        clean_model = candidate_model.replace("models/", "")
+        url = f"{config.GEMINI_BASE_URL}/models/{clean_model}:generateContent?key={key}"
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                candidates = data.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        return parts[0].get("text", "").strip()
+                return "Notice: Gemini generated empty response."
+            elif resp.status_code == 429:
+                # Quota/rate-limit hit on this model, cascade to next Gemini model
+                last_error = f"Gemini {clean_model} Rate Limit Exceeded (HTTP 429)"
+                continue
+            else:
+                last_error = f"Error from Gemini API ({resp.status_code}): {resp.text}"
+                break
+        except Exception as e:
+            last_error = f"Error communicating with Gemini API: {str(e)}"
+            break
+
+    return last_error
 
 
 class RAGAssistant:
@@ -210,19 +229,20 @@ Please provide a precise, grounded answer based ONLY on the evidence above. List
         active_model = model_override or self.model
 
         # Case A: User explicitly chose Gemini model
-        if active_model and ("gemini" in active_model.lower() or active_model == "Gemini-2.5-Flash (Cloud Fallback)"):
-            gemini_ans = generate_gemini_response(user_prompt, model=config.GEMINI_FALLBACK_MODEL)
-            if not gemini_ans.startswith("Error") and not gemini_ans.startswith("Notice:"):
+        if active_model and ("gemini" in active_model.lower() or "cloud fallback" in active_model.lower()):
+            gemini_model_name = active_model.split()[0] if "gemini" in active_model.lower() else config.GEMINI_FALLBACK_MODEL
+            gemini_ans = generate_gemini_response(user_prompt, model=gemini_model_name)
+            if not gemini_ans.startswith("Error") and not gemini_ans.startswith("Notice:") and "Rate Limit Exceeded" not in gemini_ans:
                 if "Sources:" not in gemini_ans and unique_citations:
                     gemini_ans += "\n\n**Sources:**\n" + "\n".join([f"- {c}" for c in unique_citations])
                 return {
                     "answer": gemini_ans,
                     "citations": unique_citations,
                     "evidence": retrieved_chunks,
-                    "model_used": f"Google Gemini ({config.GEMINI_FALLBACK_MODEL})",
+                    "model_used": f"Google Gemini ({gemini_model_name})",
                     "status": "success"
                 }
-            # If Gemini fails, gracefully cascade to local Ollama below
+            # If Gemini fails or hits rate limits, gracefully cascade to local Ollama below
 
         # Case B: Local Ollama inference with multi-model fallback cascade
         if self.ollama_available:
@@ -283,7 +303,7 @@ Please provide a precise, grounded answer based ONLY on the evidence above. List
         # Case C: Cloud Gemini Fallback (if Ollama failed, model missing, or offline)
         if config.GEMINI_API_KEY:
             gemini_ans = generate_gemini_response(user_prompt, model=config.GEMINI_FALLBACK_MODEL)
-            if not gemini_ans.startswith("Error") and not gemini_ans.startswith("Notice:"):
+            if not gemini_ans.startswith("Error") and not gemini_ans.startswith("Notice:") and "Rate Limit Exceeded" not in gemini_ans:
                 if "Sources:" not in gemini_ans and unique_citations:
                     gemini_ans += "\n\n**Sources:**\n" + "\n".join([f"- {c}" for c in unique_citations])
                 return {
