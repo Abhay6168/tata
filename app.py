@@ -1,3 +1,4 @@
+import config
 import streamlit as st
 import os
 import json
@@ -8,7 +9,6 @@ import plotly.graph_objects as go
 import networkx as nx
 
 # Import custom modules
-import config
 from modules import database
 from modules import pdf_processor
 from modules import chunker
@@ -90,6 +90,10 @@ database.init_db()
 
 # Cached Resources
 @st.cache_resource
+def get_cached_embedding_model():
+    return embeddings.get_embedding_model()
+
+@st.cache_resource
 def get_cached_vector_store():
     return vector_store.VectorStore()
 
@@ -98,6 +102,7 @@ def get_cached_rag_assistant():
     vs = get_cached_vector_store()
     return rag.RAGAssistant(vs)
 
+_emb_model = get_cached_embedding_model()
 v_store = get_cached_vector_store()
 rag_assistant = get_cached_rag_assistant()
 

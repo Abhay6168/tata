@@ -1,20 +1,31 @@
 import numpy as np
 from typing import List, Union
+import threading
 import config
 
 _model_instance = None
+_model_lock = threading.Lock()
 
 def get_embedding_model():
     """
-    Returns the singleton instance of SentenceTransformer.
+    Returns the thread-safe singleton instance of SentenceTransformer.
     """
     global _model_instance
     if _model_instance is None:
-        try:
-            from sentence_transformers import SentenceTransformer
-            _model_instance = SentenceTransformer(config.EMBEDDING_MODEL_NAME)
-        except Exception as e:
-            raise RuntimeError(f"Failed to load SentenceTransformer ({config.EMBEDDING_MODEL_NAME}): {str(e)}")
+        with _model_lock:
+            if _model_instance is None:
+                try:
+                    import torch
+                    from sentence_transformers import SentenceTransformer
+                    
+                    # Explicitly set device to avoid PyTorch meta tensor allocations
+                    device = "cuda" if torch.cuda.is_available() else "cpu"
+                    _model_instance = SentenceTransformer(
+                        config.EMBEDDING_MODEL_NAME,
+                        device=device
+                    )
+                except Exception as e:
+                    raise RuntimeError(f"Failed to load SentenceTransformer ({config.EMBEDDING_MODEL_NAME}): {str(e)}")
     return _model_instance
 
 
